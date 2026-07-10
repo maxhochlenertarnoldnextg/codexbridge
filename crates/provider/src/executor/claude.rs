@@ -352,6 +352,15 @@ fn remove_anthropic_incompatible_openai_fields(request: &mut ChatRequest) {
     request.extra.remove("temperature");
     request.extra.remove("top_p");
     request.extra.remove("n");
+    // Drop OpenAI-compat reasoning parameters that the Anthropic Messages API
+    // rejects as "Extra inputs are not permitted". Many OpenAI-compatible
+    // clients and agent frameworks send these, but they have no Anthropic wire
+    // equivalent here. `thinking` is handled separately by
+    // `normalize_opencode_thinking` below.
+    request.extra.remove("reasoning_effort");
+    request.extra.remove("reasoning");
+    request.extra.remove("think");
+    request.extra.remove("thinking_config");
     normalize_opencode_thinking(&mut request.extra);
     for message in &mut request.messages {
         if let Some(obj) = message.as_object_mut() {
@@ -543,6 +552,29 @@ mod tests {
         assert!(body["messages"][0].get("cache_control").is_none());
         assert_eq!(body["stream"], true);
         assert_eq!(body["max_tokens"], 32);
+    }
+
+    #[test]
+    fn test_removes_openai_reasoning_params() {
+        let mut request: ChatRequest = serde_json::from_value(json!({
+            "model": "claude-opus-4-8",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 8,
+            "reasoning_effort": "none",
+            "reasoning": {"effort": "low"},
+            "think": false,
+            "thinking_config": {"budget": 1024}
+        }))
+        .unwrap();
+
+        remove_anthropic_incompatible_openai_fields(&mut request);
+        let body = request.into_body();
+
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("reasoning").is_none());
+        assert!(body.get("think").is_none());
+        assert!(body.get("thinking_config").is_none());
+        assert_eq!(body["max_tokens"], 8);
     }
 
     #[test]
